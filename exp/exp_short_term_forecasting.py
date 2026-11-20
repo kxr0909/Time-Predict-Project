@@ -54,7 +54,7 @@ class Exp_Short_Term_Forecast(Exp_Basic):
         train_data, train_loader = self._get_data(flag='train')
         vali_data, vali_loader = self._get_data(flag='val')
 
-        path = os.path.join(self.args.checkpoints, setting)
+        path = os.path.join(self.args.checkpoints, self.args.model, setting)
         if not os.path.exists(path):
             os.makedirs(path)
 
@@ -180,9 +180,9 @@ class Exp_Short_Term_Forecast(Exp_Basic):
 
         if test:
             print('loading model')
-            self.model.load_state_dict(torch.load(os.path.join('./checkpoints/' + setting, 'checkpoint.pth')))
+            self.model.load_state_dict(torch.load(os.path.join('./checkpoints', self.args.model, setting, 'checkpoint.pth')))
 
-        folder_path = './test_results/' + setting + '/'
+        folder_path = os.path.join('./test_results', self.args.model, setting)
         if not os.path.exists(folder_path):
             os.makedirs(folder_path)
 

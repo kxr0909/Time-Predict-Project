@@ -75,7 +75,7 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         vali_data, vali_loader = self._get_data(flag='val')
         test_data, test_loader = self._get_data(flag='test')
 
-        path = os.path.join(self.args.checkpoints, setting)
+        path = os.path.join(self.args.checkpoints, self.args.model, setting)
         if not os.path.exists(path):
             os.makedirs(path)
 
@@ -94,8 +94,13 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         base_model = self.model.module if hasattr(self.model, 'module') else self.model
         if hasattr(base_model, 'set_stage'):
             base_model.set_stage(1)
-            print(">>> [训练初始化] 已设置为阶段 1，开始训练 DLinear")
+            if hasattr(base_model, 'informer') and hasattr(base_model, 'patchtst') and hasattr(base_model, 'dlinear'):
+                num_stages = 4
+            else:
+                num_stages = 3
+            print(f">>> [训练初始化] 已设置为阶段 1，阶段总数: {num_stages}")
         else:
+            num_stages = 1
             print(">>> [训练初始化] 当前模型不支持分阶段训练")
 
         for epoch in range(self.args.train_epochs):
@@ -104,24 +109,46 @@ class Exp_Long_Term_Forecast(Exp_Basic):
 
             # ================== 【核心机制优化：多阶段平滑切换】 ==================
             if hasattr(base_model, 'set_stage'):
-                if epoch == 5:
-                    base_model.set_stage(2)
-                    # 1. 进入阶段 2，重置早停系统，给 PatchTST 重新收敛和适应的周期
-                    early_stopping = EarlyStopping(patience=self.args.patience, verbose=True)
-                    # 2. 强行拉回初始学习率，确保 PatchTST 有充足的步长捕捉残差细节
-                    for param_group in model_optim.param_groups:
-                        param_group['lr'] = self.args.learning_rate
-                    print(f">>>> [状态重置] 阶段 2 开始，早停计数清零，学习率恢复为: {self.args.learning_rate}")
-
-                elif epoch == 15:
-                    base_model.set_stage(3)
-                    # 1. 再次清空早停计数
-                    early_stopping = EarlyStopping(patience=self.args.patience, verbose=True)
-                    # 2. 全模型解冻进行微调，使用极细微的学习率（原初始 LR 的 1/10），防止冲垮已收敛的特征
-                    fine_tune_lr = self.args.learning_rate * 0.1
-                    for param_group in model_optim.param_groups:
-                        param_group['lr'] = fine_tune_lr
-                    print(f">>>> [状态重置] 阶段 3 开始，早停计数清零，激活微调学习率: {fine_tune_lr}")
+                if num_stages == 3:
+                    if epoch == 5:
+                        base_model.set_stage(2)
+                        early_stopping = EarlyStopping(patience=20, verbose=True)
+                        for param_group in model_optim.param_groups:
+                            param_group['lr'] = self.args.learning_rate
+                        print(f">>>> [状态重置] 阶段 2 开始，早停宽容度=20，学习率恢复为: {self.args.learning_rate}")
+                    elif epoch == 15:
+                        base_model.set_stage(3)
+                        early_stopping = EarlyStopping(patience=20, verbose=True)
+                        fine_tune_lr = self.args.learning_rate * 0.1
+                        for param_group in model_optim.param_groups:
+                            param_group['lr'] = fine_tune_lr
+                        print(f">>>> [状态重置] 阶段 3 开始，早停宽容度=20，激活微调学习率: {fine_tune_lr}")
+                    if 5 <= epoch <= 7 and hasattr(base_model, 'residual_scale'):
+                        base_model.residual_scale.data.clamp_(max=0.05)
+                elif num_stages == 4:
+                    if epoch == 4:
+                        base_model.set_stage(2)
+                        early_stopping = EarlyStopping(patience=20, verbose=True)
+                        for param_group in model_optim.param_groups:
+                            param_group['lr'] = self.args.learning_rate
+                        print(f">>>> [状态重置] 阶段 2 (PatchTST) 开始，早停宽容度=20，学习率恢复为: {self.args.learning_rate}")
+                    elif epoch == 10:
+                        base_model.set_stage(3)
+                        early_stopping = EarlyStopping(patience=20, verbose=True)
+                        for param_group in model_optim.param_groups:
+                            param_group['lr'] = self.args.learning_rate
+                        print(f">>>> [状态重置] 阶段 3 (Informer) 开始，早停宽容度=20，学习率恢复为: {self.args.learning_rate}")
+                    elif epoch == 16:
+                        base_model.set_stage(4)
+                        early_stopping = EarlyStopping(patience=20, verbose=True)
+                        fine_tune_lr = self.args.learning_rate * 0.1
+                        for param_group in model_optim.param_groups:
+                            param_group['lr'] = fine_tune_lr
+                        print(f">>>> [状态重置] 阶段 4 (全模型微调) 开始，早停宽容度=20，激活微调学习率: {fine_tune_lr}")
+                    if 4 <= epoch <= 6:
+                        base_model.patchtst_scale.data.clamp_(max=0.05)
+                    if 10 <= epoch <= 12:
+                        base_model.informer_scale.data.clamp_(max=0.01)
             # ====================================================================
 
             self.model.train()
@@ -203,13 +230,13 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         test_data, test_loader = self._get_data(flag='test')
         if test:
             print('loading model')
-            self.model.load_state_dict(torch.load(os.path.join('./checkpoints/' + setting, 'checkpoint.pth')))
+            self.model.load_state_dict(torch.load(os.path.join('./checkpoints', self.args.model, setting, 'checkpoint.pth')))
 
         preds = []
         trues = []
-        folder_path = './test_results/' + setting + '/'
-        if not os.path.exists(folder_path):
-            os.makedirs(folder_path)
+        test_folder = os.path.join('./test_results', self.args.model, setting)
+        if not os.path.exists(test_folder):
+            os.makedirs(test_folder)
 
         self.model.eval()
         with torch.no_grad():
@@ -254,14 +281,14 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                         input_x = test_data.inverse_transform(input_x.reshape(shape[0] * shape[1], -1)).reshape(shape)
                     gt = np.concatenate((input_x[0, :, -1], batch_y[0, :, -1]), axis=0)
                     pd = np.concatenate((input_x[0, :, -1], outputs[0, :, -1]), axis=0)
-                    visual(gt, pd, os.path.join(folder_path, str(i) + '.pdf'))
+                    visual(gt, pd, os.path.join(test_folder, str(i) + '.pdf'))
 
         preds = np.concatenate(preds, axis=0)
         trues = np.concatenate(trues, axis=0)
         preds = preds.reshape(-1, preds.shape[-2], preds.shape[-1])
         trues = trues.reshape(-1, trues.shape[-2], trues.shape[-1])
 
-        folder_path = './results/' + setting + '/'
+        folder_path = os.path.join('./results', self.args.model, setting)
         if not os.path.exists(folder_path):
             os.makedirs(folder_path)
 
@@ -287,7 +314,8 @@ class Exp_Long_Term_Forecast(Exp_Basic):
             f.write('mse:{}, mae:{}, dtw:{}'.format(mse, mae, dtw_val))
             f.write('\n\n')
 
-        np.save(folder_path + 'metrics.npy', np.array([mae, mse, rmse, mape, mspe]))
-        np.save(folder_path + 'pred.npy', preds)
-        np.save(folder_path + 'true.npy', trues)
+        np.save(os.path.join(folder_path, 'metrics.npy'), np.array([mae, mse, rmse, mape, mspe]))
+        np.save(os.path.join(folder_path, 'pred.npy'), preds)
+        np.save(os.path.join(folder_path, 'true.npy'), trues)
+        print(f'Results saved to: {folder_path}')
         return

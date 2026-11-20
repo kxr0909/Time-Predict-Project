@@ -22,7 +22,7 @@ class Model(nn.Module):
         self.patchtst = PatchTSTModel(configs)
         
         # 将残差缩放系数改为通道独立的 Parameter，让不同变量有不同的缩放力度
-        self.residual_scale = nn.Parameter(torch.ones(1, 1, self.enc_in) * 0.5)
+        self.residual_scale = nn.Parameter(torch.ones(1, 1, self.enc_in) * 0.01)
         
         # 改进的偏置校正：使用 1D 分组卷积保持通道独立性 (Groups = enc_in)
         # 仅在时间维度上做微小的线性微调，避免过拟合与跨通道干扰
@@ -34,7 +34,7 @@ class Model(nn.Module):
 
     def set_stage(self, stage=1):
         """
-        核心控制函数：通过冻结/放开参数，解决“梯度打架”和“残差淹没”
+        核心控制函数：通过冻结/放开参数，解决"梯度打架"和"残差淹没"
         stage=1: 仅训练 DLinear（抓取主趋势）
         stage=2: 冻结 DLinear，专心训练 PatchTST（抓取残差）
         stage=3: 全解冻微调
@@ -44,12 +44,14 @@ class Model(nn.Module):
             for p in self.patchtst.parameters(): p.requires_grad = False
             for p in self.bias_correction.parameters(): p.requires_grad = False
             self.residual_scale.requires_grad = False
+            self.residual_scale.data.fill_(0.01)
             print(">>> [Stage 1] 只有 DLinear 参与训练，锁定 PatchTST。")
         elif stage == 2:
             for p in self.dlinear.parameters(): p.requires_grad = False
             for p in self.patchtst.parameters(): p.requires_grad = True
             for p in self.bias_correction.parameters(): p.requires_grad = True
             self.residual_scale.requires_grad = True
+            self.residual_scale.data.fill_(0.01)
             print(">>> [Stage 2] 锁定 DLinear，专门训练 PatchTST 拟合残差。")
         elif stage == 3:
             for p in self.parameters(): p.requires_grad = True

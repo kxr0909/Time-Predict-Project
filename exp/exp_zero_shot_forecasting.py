@@ -43,7 +43,7 @@ class Exp_Zero_Shot_Forecast(Exp_Basic):
 
         preds = []
         trues = []
-        folder_path = './test_results/' + setting + '/'
+        folder_path = os.path.join('./test_results', self.args.model, setting)
         if not os.path.exists(folder_path):
             os.makedirs(folder_path)
 
@@ -104,7 +104,7 @@ class Exp_Zero_Shot_Forecast(Exp_Basic):
         print('test shape:', preds.shape, trues.shape)
 
         # result save
-        folder_path = './results/' + setting + '/'
+        folder_path = os.path.join('./results', self.args.model, setting)
         if not os.path.exists(folder_path):
             os.makedirs(folder_path)
 

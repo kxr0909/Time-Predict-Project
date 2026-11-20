@@ -166,3 +166,13 @@ result_anomaly_detection.txt
 scripts/augmentation/
 run_anylearn.py
 environment.txt
+
+# Real data (too large for GitHub, needs separate transfer)
+real_data/
+
+# Office temp/lock files
+.~lock*
+*.docx#
+*.doc#
+*.xlsx#
+*.xls#

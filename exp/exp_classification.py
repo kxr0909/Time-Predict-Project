@@ -81,7 +81,7 @@ class Exp_Classification(Exp_Basic):
         vali_data, vali_loader = self._get_data(flag='TEST')
         test_data, test_loader = self._get_data(flag='TEST')
 
-        path = os.path.join(self.args.checkpoints, setting)
+        path = os.path.join(self.args.checkpoints, self.args.model, setting)
         if not os.path.exists(path):
             os.makedirs(path)
 
@@ -146,11 +146,11 @@ class Exp_Classification(Exp_Basic):
         test_data, test_loader = self._get_data(flag='TEST')
         if test:
             print('loading model')
-            self.model.load_state_dict(torch.load(os.path.join(self.args.checkpoints, setting, 'checkpoint.pth')))
+            self.model.load_state_dict(torch.load(os.path.join(self.args.checkpoints, self.args.model, setting, 'checkpoint.pth')))
 
         preds = []
         trues = []
-        folder_path = './test_results/' + setting + '/'
+        folder_path = os.path.join('./test_results', self.args.model, setting)
         if not os.path.exists(folder_path):
             os.makedirs(folder_path)
 
@@ -176,7 +176,7 @@ class Exp_Classification(Exp_Basic):
         accuracy = cal_accuracy(predictions, trues)
 
         # result save
-        folder_path = './results/' + setting + '/'
+        folder_path = os.path.join('./results', self.args.model, setting)
         if not os.path.exists(folder_path):
             os.makedirs(folder_path)
 

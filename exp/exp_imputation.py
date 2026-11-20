@@ -80,7 +80,7 @@ class Exp_Imputation(Exp_Basic):
         vali_data, vali_loader = self._get_data(flag='val')
         test_data, test_loader = self._get_data(flag='test')
 
-        path = os.path.join(self.args.checkpoints, setting)
+        path = os.path.join(self.args.checkpoints, self.args.model, setting)
         if not os.path.exists(path):
             os.makedirs(path)
 
@@ -157,12 +157,12 @@ class Exp_Imputation(Exp_Basic):
         test_data, test_loader = self._get_data(flag='test')
         if test:
             print('loading model')
-            self.model.load_state_dict(torch.load(os.path.join('./checkpoints/' + setting, 'checkpoint.pth')))
+            self.model.load_state_dict(torch.load(os.path.join('./checkpoints', self.args.model, setting, 'checkpoint.pth')))
 
         preds = []
         trues = []
         masks = []
-        folder_path = './test_results/' + setting + '/'
+        folder_path = os.path.join('./test_results', self.args.model, setting)
         if not os.path.exists(folder_path):
             os.makedirs(folder_path)
 
@@ -209,7 +209,7 @@ class Exp_Imputation(Exp_Basic):
         print('test shape:', preds.shape, trues.shape)
 
         # result save
-        folder_path = './results/' + setting + '/'
+        folder_path = os.path.join('./results', self.args.model, setting)
         if not os.path.exists(folder_path):
             os.makedirs(folder_path)
 

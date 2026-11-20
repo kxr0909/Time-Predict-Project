@@ -5,6 +5,23 @@ import torch.backends
 from utils.print_args import print_args
 import random
 import numpy as np
+from datetime import datetime
+
+def find_latest_checkpoint(model_name, data, seq_len, pred_len):
+    """Find the latest checkpoint directory matching the training pattern."""
+    checkpoint_dir = os.path.join('./checkpoints', model_name)
+    if not os.path.isdir(checkpoint_dir):
+        return None
+    pattern_suffix = f'_{model_name}_{data}_sl{seq_len}_pl{pred_len}'
+    candidates = []
+    for d in os.listdir(checkpoint_dir):
+        if d.endswith(pattern_suffix) and os.path.isdir(os.path.join(checkpoint_dir, d)):
+            candidates.append(d)
+    if not candidates:
+        return None
+    candidates.sort(reverse=True)
+    return candidates[0]
+
 
 if __name__ == '__main__':
     fix_seed = 2021
@@ -58,11 +75,11 @@ if __name__ == '__main__':
     parser.add_argument('--enc_in', type=int, default=7, help='encoder input size')
     parser.add_argument('--dec_in', type=int, default=7, help='decoder input size')
     parser.add_argument('--c_out', type=int, default=7, help='output size')
-    parser.add_argument('--d_model', type=int, default=512, help='dimension of model')
+    parser.add_argument('--d_model', type=int, default=768, help='dimension of model')
     parser.add_argument('--n_heads', type=int, default=8, help='num of heads')
     parser.add_argument('--e_layers', type=int, default=2, help='num of encoder layers')
     parser.add_argument('--d_layers', type=int, default=1, help='num of decoder layers')
-    parser.add_argument('--d_ff', type=int, default=2048, help='dimension of fcn')
+    parser.add_argument('--d_ff', type=int, default=3072, help='dimension of fcn')
     parser.add_argument('--moving_avg', type=int, default=25, help='window size of moving average')
     parser.add_argument('--factor', type=int, default=1, help='attn factor')
     parser.add_argument('--distil', action='store_false',
@@ -87,10 +104,10 @@ if __name__ == '__main__':
                         help='the length of segmen-wise iteration of SegRNN')
 
     # ==================== 【优化核心：调整默认值】 ====================
-    parser.add_argument('--num_workers', type=int, default=0, help='data loader num workers')
+    parser.add_argument('--num_workers', type=int, default=4, help='data loader num workers')
     parser.add_argument('--itr', type=int, default=1, help='experiments times')
     parser.add_argument('--train_epochs', type=int, default=30, help='train epochs') # 默认增加到30代
-    parser.add_argument('--batch_size', type=int, default=32, help='batch size of train input data')
+    parser.add_argument('--batch_size', type=int, default=64, help='batch size of train input data')
     parser.add_argument('--patience', type=int, default=10, help='early stopping patience') # 早停容忍度提高到10
     parser.add_argument('--learning_rate', type=float, default=0.0001, help='optimizer learning rate')
     # ==================================================================
@@ -98,7 +115,7 @@ if __name__ == '__main__':
     parser.add_argument('--des', type=str, default='test', help='exp description')
     parser.add_argument('--loss', type=str, default='MSE', help='loss function')
     parser.add_argument('--lradj', type=str, default='type1', help='adjust learning rate')
-    parser.add_argument('--use_amp', action='store_true', help='use automatic mixed precision training', default=False)
+    parser.add_argument('--use_amp', action='store_true', help='use automatic mixed precision training', default=True)
 
     # GPU
     parser.add_argument('--use_gpu', action='store_true', default=torch.cuda.is_available(), help='use gpu (auto-detect)')
@@ -164,6 +181,10 @@ if __name__ == '__main__':
     if args.use_gpu and torch.cuda.is_available() and args.gpu_type == 'cuda':
         args.device = torch.device('cuda:{}'.format(args.gpu))
         print('Using GPU: cuda:{}'.format(args.gpu))
+        torch.backends.cudnn.benchmark = True
+        torch.backends.cudnn.allow_tf32 = True
+        torch.backends.cuda.matmul.allow_tf32 = True
+        print('[CUDA] cudnn.benchmark = True, TF32 enabled for Ampere')
     elif args.use_gpu and hasattr(torch.backends, 'mps') and torch.backends.mps.is_available() and args.gpu_type == 'mps':
         args.device = torch.device('mps')
         print('Using GPU: mps')
@@ -207,32 +228,8 @@ if __name__ == '__main__':
     if args.is_training:
         for ii in range(args.itr):
             exp = Exp(args)  # set experiments
-            setting = '{}_{}_{}_{}_ft{}_sl{}_ll{}_pl{}_dm{}_nh{}_el{}_dl{}_df{}_expand{}_dc{}_fc{}_eb{}_dt{}_{}_{}'.format(
-                args.task_name,
-                args.model_id,
-                args.model,
-                args.data,
-                args.features,
-                args.seq_len,
-                args.label_len,
-                args.pred_len,
-                args.d_model,
-                args.n_heads,
-                args.e_layers,
-                args.d_layers,
-                args.d_ff,
-                args.expand,
-                args.d_conv,
-                args.factor,
-                args.embed,
-                args.distil,
-                args.des, ii)
-            
-            if args.model == 'MambaSingleLayer' and args.task_name == 'classification':
-                setting = f'{args.task_name}_CLS_{args.model_id}_{args.model}_{args.data}_ft{args.features}' \
-                        + f'_sl{args.seq_len}_ll{args.label_len}_pl{args.pred_len}_dm{args.d_model}_ds{args.d_ff}' \
-                        + f'_expand{args.expand}_dc{args.d_conv}_nk{args.num_kernels}' \
-                        + f'_tvdt{int(args.tv_dt)}_tvB{int(args.tv_B)}_tvC{int(args.tv_C)}_useD{int(args.use_D)}_{args.des}_{ii}'
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            setting = f'{timestamp}_{args.model}_{args.data}_sl{args.seq_len}_pl{args.pred_len}'
 
             print('>>>>>>>start training : {}>>>>>>>>>>>>>>>>>>>>>>>>>>'.format(setting))
             exp.train(setting)
@@ -247,32 +244,13 @@ if __name__ == '__main__':
     else:
         exp = Exp(args)  # set experiments
         ii = 0
-        setting = '{}_{}_{}_{}_ft{}_sl{}_ll{}_pl{}_dm{}_nh{}_el{}_dl{}_df{}_expand{}_dc{}_fc{}_eb{}_dt{}_{}_{}'.format(
-            args.task_name,
-            args.model_id,
-            args.model,
-            args.data,
-            args.features,
-            args.seq_len,
-            args.label_len,
-            args.pred_len,
-            args.d_model,
-            args.n_heads,
-            args.e_layers,
-            args.d_layers,
-            args.d_ff,
-            args.expand,
-            args.d_conv,
-            args.factor,
-            args.embed,
-            args.distil,
-            args.des, ii)
-        
-        if args.model == 'MambaSingleLayer' and args.task_name == 'classification':
-            setting = f'{args.task_name}_CLS_{args.model_id}_{args.model}_{args.data}_ft{args.features}' \
-                    + f'_sl{args.seq_len}_ll{args.label_len}_pl{args.pred_len}_dm{args.d_model}_ds{args.d_ff}' \
-                    + f'_expand{args.expand}_dc{args.d_conv}_nk{args.num_kernels}' \
-                    + f'_tvdt{args.tv_dt}_tvB{args.tv_B}_tvC{args.tv_C}_useD{int(args.use_D)}_{args.des}_{ii}'
+        latest_ckpt = find_latest_checkpoint(args.model, args.data, args.seq_len, args.pred_len)
+        if latest_ckpt:
+            setting = latest_ckpt
+            print(f'Found latest checkpoint: {setting}')
+        else:
+            setting = f'{args.model}_{args.data}_sl{args.seq_len}_pl{args.pred_len}'
+            print(f'[WARN] No checkpoint found, using setting without timestamp: {setting}')
 
         print('>>>>>>>testing : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
         exp.test(setting, test=1)
